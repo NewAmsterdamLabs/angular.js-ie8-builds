@@ -101,9 +101,6 @@
   Object.create = (function () {
     var Object = function () {};
     return function (prototype) {
-      if (arguments.length > 1) {
-        throw Error('Second argument not supported');
-      }
       if (typeof prototype != 'object') {
         throw TypeError('Argument must be an object');
       }
@@ -11420,6 +11417,7 @@ function LocationHtml5Url(appBase, basePrefix) {
   var appBaseNoFile = stripFile(appBase);
   parseAbsoluteUrl(appBase, this);
 
+  var realAppBase = appBase;
 
   /**
    * Parse given html5 (regular) url string into properties
@@ -11481,6 +11479,36 @@ function LocationHtml5Url(appBase, basePrefix) {
     }
     return !!rewrittenUrl;
   };
+
+  /**
+   * Set the appBase and appBaseNoFile to "sandbox" values using a new base href.
+   * Allows use to change the URL to something that lives outside of the current app root.
+   * @private
+   */
+  this.$$setSandboxBaseHref = function(sandboxBaseHref) {
+    appBase = serverBase(this.absUrl()) + (sandboxBaseHref || '/');
+    appBaseNoFile = stripFile(appBase);
+  };
+
+  /**
+   * Restores appBase and appBaseNoFile to their "real" values.
+   * @private
+   */
+  this.$$restoreAppBase = function() {
+    if (appBase === realAppBase) {
+      return;
+    }
+    appBase = realAppBase;
+    appBaseNoFile = stripFile(realAppBase);
+  }
+
+  /**
+   * Checks if the supplied URL lives under our current appBase.
+   * @private
+   */
+  this.$$underAppBase = function(url) {
+    return url.indexOf(appBase) === 0;
+  }
 }
 
 
@@ -11585,6 +11613,14 @@ function LocationHashbangUrl(appBase, hashPrefix) {
     }
     return false;
   };
+
+  /**
+   * Checks if the supplied URL lives under our current appBase.
+   * @private
+   */
+  this.$$underAppBase = function(url) {
+    return url.indexOf(appBase) === 0;
+  }
 }
 
 
@@ -11636,6 +11672,13 @@ function LocationHashbangInHtml5Url(appBase, hashPrefix) {
     this.$$absUrl = appBase + hashPrefix + this.$$url;
   };
 
+  /**
+   * Checks if the supplied URL lives under our current appBase.
+   * @private
+   */
+  this.$$underAppBase = function(url) {
+    return url.indexOf(appBase) === 0;
+  }
 }
 
 
@@ -11919,7 +11962,11 @@ var locationPrototype = {
   replace: function() {
     this.$$replace = true;
     return this;
-  }
+  },
+
+  // set noops here, we only want these to do something in HTML5 mode
+  $$setSandboxBaseHref: noop,
+  $$restoreAppBase: noop
 };
 
 forEach([LocationHashbangInHtml5Url, LocationHashbangUrl, LocationHtml5Url], function(Location) {
@@ -11957,6 +12004,10 @@ forEach([LocationHashbangInHtml5Url, LocationHashbangUrl, LocationHtml5Url], fun
     // but we're changing the $$state reference to $browser.state() during the $digest
     // so the modification window is narrow.
     this.$$state = isUndefined(state) ? null : state;
+
+    if (state.sandboxBaseHref) {
+      this.$$setSandboxBaseHref(state.sandboxBaseHref);
+    }
 
     return this;
   };
@@ -12221,10 +12272,23 @@ function $LocationProvider() {
 
     // update $location when $browser url changes
     $browser.onUrlChange(function(newUrl, newState) {
+      var newStateInSandbox = newState && newState.sandboxBaseHref;
+
+      // if the state we're going to isn't in a sandbox and the new url doesn't live under our current appBase, do a full redirect.
+      if (!newStateInSandbox && !$location.$$underAppBase(newUrl)) {
+        $window.location.assign(newUrl);
+        return;
+      }
+
       $rootScope.$evalAsync(function() {
         var oldUrl = $location.absUrl();
         var oldState = $location.$$state;
         var defaultPrevented;
+
+        // check if we need to set a sandbox base href
+        if (newStateInSandbox) {
+          $location.$$setSandboxBaseHref(newState.sandboxBaseHref);
+        }
 
         $location.$$parse(newUrl);
         $location.$$state = newState;
@@ -12253,9 +12317,10 @@ function $LocationProvider() {
       var oldUrl = trimEmptyHash($browser.url());
       var newUrl = trimEmptyHash($location.absUrl());
       var oldState = $browser.state();
+      var newState = $location.$$state;
       var currentReplace = $location.$$replace;
       var urlOrStateChanged = oldUrl !== newUrl ||
-        ($location.$$html5 && $sniffer.history && oldState !== $location.$$state);
+        ($location.$$html5 && $sniffer.history && oldState !== newState);
 
       if (initializing || urlOrStateChanged) {
         initializing = false;
@@ -12263,7 +12328,7 @@ function $LocationProvider() {
         $rootScope.$evalAsync(function() {
           var newUrl = $location.absUrl();
           var defaultPrevented = $rootScope.$broadcast('$locationChangeStart', newUrl, oldUrl,
-              $location.$$state, oldState).defaultPrevented;
+              newState, oldState).defaultPrevented;
 
           // if the location was changed by a `$locationChangeStart` handler then stop
           // processing this location change
@@ -12293,6 +12358,8 @@ function $LocationProvider() {
     function afterLocationChange(oldUrl, oldState) {
       $rootScope.$broadcast('$locationChangeSuccess', $location.absUrl(), oldUrl,
         $location.$$state, oldState);
+
+      $location.$$restoreAppBase();
     }
 }];
 }
@@ -16531,7 +16598,7 @@ function adjustMatchers(matchers) {
  *
  * - your app is hosted at url `http://myapp.example.com/`
  * - but some of your templates are hosted on other domains you control such as
- *   `http://srv01.assets.example.com/`,  `http://srv02.assets.example.com/`, etc.
+ *   `http://srv01.assets.example.com/`,  `http://srv02.assets.example.com/`, etc.
  * - and you have an open redirect at `http://myapp.example.com/clickThru?...`.
  *
  * Here is what a secure configuration for this scenario might look like:
@@ -28361,3 +28428,4 @@ var minlengthDirective = function() {
 
 !window.angular.$$csp() && window.angular.element(document).find('head').prepend('<style type="text/css">@charset "UTF-8";[ng\\:cloak],[ng-cloak],[data-ng-cloak],[x-ng-cloak],.ng-cloak,.x-ng-cloak,.ng-hide:not(.ng-hide-animate){display:none !important;}ng\\:form{display:block;}.ng-animate-shim{visibility:hidden;}.ng-anchor{position:absolute;}</style>');
 ;angular.element(document).find('head').prepend('<!--[if IE 8]><style>.ng-hide {display: none !important;}</style><![endif]-->');
+
