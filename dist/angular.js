@@ -12233,7 +12233,6 @@ function $LocationProvider() {
         if (elm[0] === $rootElement[0] || !(elm = elm.parent())[0]) return;
       }
 
-
       var absHref = elm.prop('href');
       // get the actual href attribute - see
       // http://msdn.microsoft.com/en-us/library/ie/dd347148(v=vs.85).aspx
