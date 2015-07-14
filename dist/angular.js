@@ -12179,7 +12179,8 @@ function $LocationProvider() {
         LocationMode,
         baseHref = $browser.baseHref(), // if base[href] is undefined, it defaults to ''
         initialUrl = $browser.url(),
-        appBase;
+        appBase,
+        blockLocation = false;
 
     if (html5Mode.enabled) {
       if (!baseHref && html5Mode.requireBase) {
@@ -12232,6 +12233,7 @@ function $LocationProvider() {
         if (elm[0] === $rootElement[0] || !(elm = elm.parent())[0]) return;
       }
 
+
       var absHref = elm.prop('href');
       // get the actual href attribute - see
       // http://msdn.microsoft.com/en-us/library/ie/dd347148(v=vs.85).aspx
@@ -12259,6 +12261,8 @@ function $LocationProvider() {
             $window.angular['ff-684208-preventDefault'] = true;
           }
         }
+      } else {
+        blockLocation = true;
       }
     });
 
@@ -12272,6 +12276,12 @@ function $LocationProvider() {
 
     // update $location when $browser url changes
     $browser.onUrlChange(function(newUrl, newState) {
+      // check if we should block any location syncing (one-time only)
+      if (blockLocation) {
+        blockLocation = false;
+        return;
+      }
+
       var newStateInSandbox = newState && newState.sandboxBaseHref;
 
       // if the state we're going to isn't in a sandbox and the new url doesn't live under our current appBase, do a full redirect.
