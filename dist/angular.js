@@ -12260,7 +12260,7 @@ function $LocationProvider() {
             $window.angular['ff-684208-preventDefault'] = true;
           }
         }
-      } else {
+      } else if (!!elm.attr('target')) {
         blockLocation = true;
       }
     });
